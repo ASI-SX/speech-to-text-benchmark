@@ -6,16 +6,9 @@ import time
 import uuid
 from enum import Enum
 
-import boto3
 import numpy as np
 import requests
 import soundfile
-from deepspeech import Model
-from google.cloud import speech
-from google.cloud.speech import enums
-from google.cloud.speech import types
-from pocketsphinx import get_model_path
-from pocketsphinx.pocketsphinx import Decoder
 
 
 class ASREngines(Enum):
@@ -60,6 +53,7 @@ class ASREngine(object):
 
 class AmazonTranscribe(ASREngine):
     def __init__(self):
+        import boto3
         self._s3 = boto3.client('s3')
         self._s3_bucket = str(uuid.uuid4())
         self._s3.create_bucket(
@@ -80,22 +74,32 @@ class AmazonTranscribe(ASREngine):
         s3_object = os.path.basename(path)
         self._s3.upload_file(path, self._s3_bucket, s3_object)
 
-        self._transcribe.start_transcription_job(
-            TranscriptionJobName=job_name,
-            Media={'MediaFileUri': 'https://s3-us-west-2.amazonaws.com/%s/%s' % (self._s3_bucket, s3_object)},
-            MediaFormat='wav',
-            LanguageCode='en-US')
+        try:
+            self._transcribe.start_transcription_job(
+                TranscriptionJobName=job_name,
+                Media={'MediaFileUri': 'https://s3-us-west-2.amazonaws.com/%s/%s' % (self._s3_bucket, s3_object)},
+                MediaFormat='wav',
+                LanguageCode='en-US')
+        except:
+            print("An exception occurred")
 
         while True:
             status = self._transcribe.get_transcription_job(TranscriptionJobName=job_name)
-            if status['TranscriptionJob']['TranscriptionJobStatus'] is 'COMPLETED':
+            job_stat = status['TranscriptionJob']['TranscriptionJobStatus']
+            # print("AWS transcription job status is '%s' " %job_stat)
+            # print(type(job_stat))
+            if job_stat == 'COMPLETED':
+                # print("leaving while loop")
                 break
             time.sleep(5)
 
+        # print("retrieving content...")
         content = requests.get(status['TranscriptionJob']['Transcript']['TranscriptFileUri'])
+        # print(content)
 
         res = json.loads(content.content.decode('utf8'))['results']['transcripts'][0]['transcript']
         res = res.translate(str.maketrans('', '', string.punctuation))
+        print(res)
 
         with open(cache_path, 'w') as f:
             f.write(res)
@@ -108,6 +112,8 @@ class AmazonTranscribe(ASREngine):
 
 class CMUPocketSphinxASREngine(ASREngine):
     def __init__(self):
+        from pocketsphinx import get_model_path
+        from pocketsphinx.pocketsphinx import Decoder
         # https://github.com/cmusphinx/pocketsphinx-python/blob/master/example.py
         config = Decoder.default_config()
         config.set_string('-logfn', '/dev/null')
@@ -146,9 +152,12 @@ class CMUPocketSphinxASREngine(ASREngine):
 
 class GoogleSpeechToText(ASREngine):
     def __init__(self):
+        from google.cloud import speech
         self._client = speech.SpeechClient()
 
     def transcribe(self, path):
+        from google.cloud.speech import types
+        from google.cloud.speech import enums
         cache_path = path.replace('.wav', '.ggl')
         if os.path.exists(cache_path):
             with open(cache_path) as f:
@@ -179,6 +188,7 @@ class GoogleSpeechToText(ASREngine):
 
 class MozillaDeepSpeechASREngine(ASREngine):
     def __init__(self):
+        from deepspeech import Model
         deepspeech_dir = os.path.join(os.path.dirname(__file__), 'resources/deepspeech')
         model_path = os.path.join(deepspeech_dir, 'output_graph.pbmm')
         alphabet_path = os.path.join(deepspeech_dir, 'alphabet.txt')
@@ -210,6 +220,12 @@ class PicovoiceCheetahASREngine(ASREngine):
         self._cheetah_license_path = os.path.join(cheetah_dir, 'cheetah_eval_linux.lic')
 
     def transcribe(self, path):
+        cache_path = path.replace('.wav', '.cheetah')
+
+        if os.path.exists(cache_path):
+            with open(cache_path) as f:
+                return f.read()
+
         args = [
             self._cheetah_demo_path,
             self._cheetah_library_path,
@@ -222,6 +238,9 @@ class PicovoiceCheetahASREngine(ASREngine):
         # Remove license notice
         filtered_res = [x for x in res.split('\n') if '[' not in x]
         filtered_res = '\n'.join(filtered_res)
+
+        with open(cache_path, 'w') as f:
+            f.write(filtered_res.strip('\n '))
 
         return filtered_res.strip('\n ')
 
@@ -239,6 +258,11 @@ class PicovoiceLeopardASREngine(ASREngine):
         self._license_path = os.path.join(leopard_dir, 'leopard_eval_linux.lic')
 
     def transcribe(self, path):
+        cache_path = path.replace('.wav', '.leopard')
+
+        if os.path.exists(cache_path):
+            with open(cache_path) as f:
+                return f.read()
         args = [
             self._demo_path,
             self._library_path,
@@ -251,6 +275,9 @@ class PicovoiceLeopardASREngine(ASREngine):
         # Remove license notice
         filtered_res = [x for x in res.split('\n') if '[' not in x]
         filtered_res = '\n'.join(filtered_res)
+
+        with open(cache_path, 'w') as f:
+            f.write(filtered_res.strip('\n '))
 
         return filtered_res.strip('\n ')
 

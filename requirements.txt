@@ -4,6 +4,6 @@ boto3
 deepspeech
 editdistance
 numpy
-pocketsphinx
+# pocketsphinx
 requests
 soundfile

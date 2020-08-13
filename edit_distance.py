@@ -1,11 +1,8 @@
-import argparse
-
 import editdistance
-import progressbar
-import inflect
 
-from dataset import *
-from engine import *
+ref_text =
+cheetah_text =
+leopard_text =
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
